@@ -7,14 +7,14 @@ import os
 from flask import Flask, jsonify, render_template, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
-from classifier import ImageClassifier, ImageValidationError, ModelUnavailableError
+from classifier import ImageClassifier, ImageValidationError, ModelUnavailableError, MODEL_NAME, MAX_UPLOAD_BYTES
 
 
 def create_app(config: dict | None = None, classifier=None) -> Flask:
     app = Flask(__name__)
     app.config.update(
-        MAX_CONTENT_LENGTH=11 * 1024 * 1024,
-        MAX_IMAGE_BYTES=10 * 1024 * 1024,
+        MAX_CONTENT_LENGTH=MAX_UPLOAD_BYTES + 1024 * 1024,
+        MAX_IMAGE_BYTES=MAX_UPLOAD_BYTES,
         MAX_FORM_MEMORY_SIZE=128 * 1024,
         MAX_FORM_PARTS=10,
     )
@@ -29,7 +29,7 @@ def create_app(config: dict | None = None, classifier=None) -> Flask:
 
     @app.get("/api/health")
     def health():
-        return jsonify(status="ok", model="MobileNetV2", model_ready=predictor.ready)
+        return jsonify(status="ok", model=MODEL_NAME, model_ready=predictor.ready)
 
     @app.post("/api/predict")
     def predict():
@@ -40,7 +40,7 @@ def create_app(config: dict | None = None, classifier=None) -> Flask:
         if not image_bytes:
             return jsonify(error="The image is empty. Please choose another file."), 400
         if len(image_bytes) > app.config["MAX_IMAGE_BYTES"]:
-            return jsonify(error="The image is too large. The upload limit is 10 MB."), 413
+            return jsonify(error="The image exceeds the 25 MB upload limit. Large photo dimensions are resized automatically."), 413
         try:
             return jsonify(predictor.predict(image_bytes))
         except ImageValidationError as exc:
@@ -57,7 +57,7 @@ def create_app(config: dict | None = None, classifier=None) -> Flask:
 
     @app.errorhandler(RequestEntityTooLarge)
     def too_large(_error):
-        return jsonify(error="The image is too large. The upload limit is 10 MB."), 413
+        return jsonify(error="The image exceeds the 25 MB upload limit. Large photo dimensions are resized automatically."), 413
 
     @app.after_request
     def response_headers(response):
@@ -85,4 +85,4 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     port = int(os.environ.get("PORT", "5000"))
     print(f"\n  Image Recognition System\n  Open http://127.0.0.1:{port}\n  Press Ctrl+C to stop.\n", flush=True)
-    serve(app, host="127.0.0.1", port=port, threads=4, max_request_body_size=11 * 1024 * 1024)
+    serve(app, host="127.0.0.1", port=port, threads=4, max_request_body_size=app.config["MAX_CONTENT_LENGTH"])

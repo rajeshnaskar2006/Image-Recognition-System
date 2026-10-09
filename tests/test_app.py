@@ -5,7 +5,7 @@ from io import BytesIO
 import pytest
 
 from app import create_app
-from classifier import ImageValidationError, ModelUnavailableError
+from classifier import ImageValidationError, ModelUnavailableError, MODEL_NAME
 
 
 class StubClassifier:
@@ -25,7 +25,7 @@ class StubClassifier:
             ],
             "image": {"width": 640, "height": 480},
             "elapsed_ms": 24.2,
-            "model": "MobileNetV2",
+            "model": MODEL_NAME,
             "low_confidence": False,
         }
 
@@ -72,7 +72,7 @@ def test_success_returns_predictions_and_passes_file_bytes(client, classifier):
     response = upload(client)
     assert response.status_code == 200
     result = response.get_json()
-    assert result["model"] == "MobileNetV2"
+    assert result["model"] == MODEL_NAME
     assert result["predictions"][0]["label"] == "golden retriever"
     assert result["predictions"][0]["confidence"] == 92.5
     assert result["image"] == {"width": 640, "height": 480}

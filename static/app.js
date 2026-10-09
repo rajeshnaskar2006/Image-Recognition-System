@@ -8,7 +8,7 @@
   const analyze = byId("analyze-button");
   const reset = byId("reset-button");
   const resultPanel = byId("results-panel");
-  const MAX_BYTES = 10 * 1024 * 1024;
+  const MAX_BYTES = 25 * 1024 * 1024;
   const MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
   let selectedFile = null;
   let previewUrl = null;
@@ -17,6 +17,7 @@
   let loadingTimer = null;
   let loading = false;
   let modelReady = false;
+  let modelName = "EfficientNetV2B3";
   let dragDepth = 0;
 
   function announce(message) {
@@ -29,10 +30,10 @@
   }
 
   function setModelStatus(ready, unavailable = false) {
-    modelReady = ready || modelReady;
+    modelReady = Boolean(ready) && !unavailable;
     byId("status-dot").classList.toggle("ready", modelReady);
     byId("status-label").textContent = modelReady
-      ? "MobileNetV2 ready"
+      ? "Recognition models ready"
       : unavailable ? "Server connection unavailable" : "Model loads on first analysis";
   }
 
@@ -84,6 +85,7 @@
     byId("empty-upload").hidden = false;
     byId("preview-change").hidden = true;
     byId("file-details").hidden = true;
+    byId("resize-note").hidden = true;
     reset.hidden = true;
     analyze.disabled = true;
     dropzone.classList.remove("has-image", "dragover");
@@ -108,7 +110,7 @@
       return;
     }
     if (file.size > MAX_BYTES) {
-      setError("This image is larger than 10 MB. Choose a smaller image and try again.");
+      setError("This file exceeds the 25 MB upload limit. Large photo dimensions are resized automatically.");
       return;
     }
     previewUrl = URL.createObjectURL(file);
@@ -144,17 +146,25 @@
 
   function renderResults(data) {
     if (!Array.isArray(data.predictions) || data.predictions.length === 0) throw new Error("The server returned no predictions. Please try again.");
+    const faceDetection = data.method === "face_detection";
+    const objectDetection = data.method === "object_detection";
+    const faceCount = Number.isInteger(data.face_count) && data.face_count > 0 ? data.face_count : 1;
     const predictions = data.predictions.slice(0, 5).map((item) => {
       const confidence = item.confidence;
-      if (typeof item.label !== "string" || !item.label.trim() || typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 100) {
+      const validScore = faceDetection ? confidence === null : typeof confidence === "number" && Number.isFinite(confidence) && confidence >= 0 && confidence <= 100;
+      if (typeof item.label !== "string" || !item.label.trim() || !validScore) {
         throw new Error("The server returned an invalid prediction. Please try again.");
       }
       return {label: formatLabel(item.label), confidence};
     });
-    predictions.sort((a, b) => b.confidence - a.confidence);
+    if (!faceDetection) predictions.sort((a, b) => b.confidence - a.confidence);
     const best = predictions[0];
     byId("best-label").textContent = best.label;
-    byId("best-confidence").textContent = `${best.confidence.toFixed(1)}%`;
+    byId("best-confidence").textContent = faceDetection ? "Face detected" : `${best.confidence.toFixed(1)}%`;
+    byId("confidence-description").textContent = faceDetection ? " · human face detection" : objectDetection ? " detection confidence" : " model confidence";
+    byId("result-kicker").textContent = faceDetection || objectDetection ? "DETECTED SUBJECT" : "MOST LIKELY MATCH";
+    byId("ranking-title").textContent = faceDetection ? "Detection result" : objectDetection ? "Detected objects" : "Top predictions";
+    byId("ranking-score-label").textContent = faceDetection ? "Status" : "Confidence";
     const list = byId("prediction-list");
     list.replaceChildren();
     predictions.forEach((prediction, index) => {
@@ -169,18 +179,22 @@
       name.textContent = prediction.label;
       const percentage = document.createElement("span");
       percentage.className = "prediction-percent";
-      percentage.textContent = `${prediction.confidence.toFixed(1)}%`;
+      percentage.textContent = faceDetection ? "Detected" : `${prediction.confidence.toFixed(1)}%`;
       const track = document.createElement("div");
       track.className = "prediction-track";
       track.setAttribute("aria-hidden", "true");
       const bar = document.createElement("div");
       bar.className = "prediction-bar";
-      bar.style.width = `${prediction.confidence}%`;
+      track.hidden = faceDetection;
+      bar.style.width = faceDetection ? "0%" : `${prediction.confidence}%`;
       track.appendChild(bar);
       row.append(rank, name, percentage, track);
       list.appendChild(row);
     });
-    byId("confidence-note").hidden = !data.low_confidence;
+    byId("confidence-note").hidden = !data.low_confidence && !faceDetection;
+    byId("confidence-note").textContent = faceDetection
+      ? `${faceCount} prominent human ${faceCount === 1 ? "face was" : "faces were"} detected. This identifies a person in the picture, not who they are. Face detection does not use ImageNet confidence scores.`
+      : "The model is uncertain. The subject may be unclear or outside its known categories. Try a clear photo with one main subject.";
     const elapsed = data.elapsed_ms;
     byId("elapsed-time").textContent = typeof elapsed === "number" && Number.isFinite(elapsed) && elapsed >= 0
       ? elapsed < 1000 ? `${Math.round(elapsed)} ms` : `${(elapsed / 1000).toFixed(1)} s`
@@ -188,15 +202,21 @@
     const dimensions = data.image;
     byId("image-dimensions").textContent = dimensions && Number.isInteger(dimensions.width) && Number.isInteger(dimensions.height) && dimensions.width > 0 && dimensions.height > 0
       ? `${dimensions.width} × ${dimensions.height} px` : "";
+    const resized = dimensions && dimensions.resized === true && Number.isInteger(dimensions.processed_width) && Number.isInteger(dimensions.processed_height);
+    byId("resize-note").hidden = !resized;
+    byId("resize-note").textContent = resized
+      ? `Automatically resized for analysis: ${dimensions.width} × ${dimensions.height} → ${dimensions.processed_width} × ${dimensions.processed_height} px. Your original file is unchanged.` : "";
+    byId("result-model").textContent = typeof data.model === "string" ? data.model : modelName;
     showResultState("ready");
-    byId("results-caption").textContent = `Top ${predictions.length} matches`;
-    announce(`Analysis complete. Most likely match: ${best.label}, ${best.confidence.toFixed(1)} percent model confidence.${data.low_confidence ? " The model is uncertain about this image." : ""}`);
+    byId("results-caption").textContent = faceDetection ? "Human face detected" : objectDetection ? "Whole-object detection" : `Top ${predictions.length} matches`;
+    announce(faceDetection ? `Analysis complete. ${faceCount} prominent human ${faceCount === 1 ? "face" : "faces"} detected.` : `Analysis complete. ${objectDetection ? "Detected" : "Most likely match"}: ${best.label}, ${best.confidence.toFixed(1)} percent ${objectDetection ? "detection" : "model"} confidence.${data.low_confidence ? " The model is uncertain about this image." : ""}`);
     setModelStatus(true);
   }
 
   async function classifyImage() {
     if (!selectedFile || loading) return;
     setError("");
+    byId("resize-note").hidden = true;
     const version = selectionVersion;
     const controller = new AbortController();
     request = controller;
@@ -211,7 +231,7 @@
       try {
         data = await response.json();
       } catch {
-        throw new Error(response.status === 413 ? "This upload is too large. Please choose an image under 10 MB." : "The server returned an unexpected response. Please try again.");
+        throw new Error(response.status === 413 ? "This file exceeds the 25 MB upload limit. Large photo dimensions are resized automatically." : "The server returned an unexpected response. Please try again.");
       }
       if (version !== selectionVersion) return;
       if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "The image could not be analyzed. Please try again.");
@@ -283,6 +303,7 @@
       const response = await fetch("/api/health", {signal: controller.signal, headers: {Accept: "application/json"}});
       if (!response.ok) throw new Error("Health check failed");
       const data = await response.json();
+      if (typeof data.model === "string") modelName = data.model;
       setModelStatus(data.model_ready === true, data.status !== "ok");
     } catch {
       setModelStatus(false, true);
