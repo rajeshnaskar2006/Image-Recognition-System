@@ -75,6 +75,33 @@ py -3.12 -m venv .venv
 
 On macOS or Linux, use `python3 -m venv .venv` and `.venv/bin/python` for the equivalent commands. The batch launchers are Windows-specific.
 
+## Deploy on Render
+
+The repository includes a `render.yaml` Blueprint for a Python web service. It uses Python 3.12, the existing Waitress server, and one process so the recognition models are not duplicated in memory.
+
+**Compute cost:** the Blueprint selects Render's paid **1 CPU / 2 GB** plan (`1c-2g`, formerly Standard), currently **$25/month** for compute. Review [Render's pricing](https://render.com/pricing) before creating the service; other usage charges can apply. The 512 MB Free and Starter plans are not recommended for this TensorFlow app. Monitor actual memory after deployment; unusually large images or heavy traffic may require more RAM.
+
+1. Sign in to [Render](https://dashboard.render.com/) and connect this GitHub repository.
+2. Choose **New > Blueprint**, select the repository and `master` branch, and review the service and cost before deploying.
+3. Render installs dependencies and prepares all three models during the build. Startup loads the cached models before the service accepts requests.
+4. Once the service is live, open its `https://...onrender.com` address and analyze an image. `/api/health` should report `model_ready: true`.
+
+For a manually created **Web Service**, use these equivalent settings:
+
+| Setting | Value |
+| --- | --- |
+| Language | Python 3 |
+| Branch | `master` |
+| Region | Singapore (or your preferred nearby region) |
+| Build command | `pip install -r requirements.txt && python prepare_model.py` |
+| Start command | `python app.py` |
+| Health check | `/api/health` |
+| Environment | `HOST=0.0.0.0`, `PRELOAD_MODELS=1`, `PYTHONUNBUFFERED=1`, `TF_NUM_INTRAOP_THREADS=1`, `TF_NUM_INTEROP_THREADS=1`, `OMP_NUM_THREADS=1` |
+
+The `.python-version` file selects Python 3.12. Leave `PORT` unset: Render provides it. Keep model preparation in the build command, not the pre-deploy command. The model cache is generated in the project directory as part of the build; no persistent disk is required. Future pushes to the linked branch automatically redeploy by default.
+
+Hosted uploads are sent to the Render server for analysis; the app does not retain them. Render provides HTTPS for its public URL. Without authentication, anyone with that URL can use the app. Local use still defaults to `127.0.0.1:5000`.
+
 ## API
 
 `GET /api/health` reports whether the server is running and whether its in-process model is loaded. `model_ready: false` before the first prediction is normal, even if weights are already downloaded.
@@ -119,4 +146,4 @@ Tests exercise Flask routes, decoding and automatic resizing (including a real 2
 - [OpenCV YOLOX-S model and Apache-2.0 license](https://github.com/opencv/opencv_zoo/tree/main/models/object_detection_yolox)
 - [TensorFlow installation guide](https://www.tensorflow.org/install/pip)
 
-The included server binds to `127.0.0.1` for use on this computer. Public deployment would need its own hosting configuration, HTTPS, and request limits appropriate to the service.
+The included server defaults to `127.0.0.1` for local use. The Render configuration sets `HOST=0.0.0.0` and uses Render's assigned `PORT` and HTTPS endpoint.

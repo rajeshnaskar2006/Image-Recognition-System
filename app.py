@@ -1,4 +1,4 @@
-"""Local image recognition web app. Run with `python app.py`."""
+"""Image recognition web app. Run locally or on Render with `python app.py`."""
 from __future__ import annotations
 
 import logging
@@ -83,6 +83,10 @@ if __name__ == "__main__":
     from waitress import serve
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "5000"))
-    print(f"\n  Image Recognition System\n  Open http://127.0.0.1:{port}\n  Press Ctrl+C to stop.\n", flush=True)
-    serve(app, host="127.0.0.1", port=port, threads=4, max_request_body_size=app.config["MAX_CONTENT_LENGTH"])
+    if os.environ.get("PRELOAD_MODELS") == "1":
+        logging.info("Loading recognition models before accepting requests")
+        app.extensions["classifier"].warm_up()
+    print(f"\n  Image Recognition System\n  Listening on http://{host}:{port}\n  Press Ctrl+C to stop.\n", flush=True)
+    serve(app, host=host, port=port, threads=4, max_request_body_size=app.config["MAX_CONTENT_LENGTH"])

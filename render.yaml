@@ -1,0 +1,24 @@
+# This compute plan is paid. Confirm its current price before creating the service.
+services:
+  - type: web
+    name: image-recognition-system
+    runtime: python
+    plan: 1c-2g
+    region: singapore
+    branch: master
+    buildCommand: pip install -r requirements.txt && python prepare_model.py
+    startCommand: python app.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: PRELOAD_MODELS
+        value: "1"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: TF_NUM_INTRAOP_THREADS
+        value: "1"
+      - key: TF_NUM_INTEROP_THREADS
+        value: "1"
+      - key: OMP_NUM_THREADS
+        value: "1"
