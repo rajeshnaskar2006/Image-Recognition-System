@@ -7,7 +7,7 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 const {File} = require("node:buffer");
-const source = fs.readFileSync(path.join(__dirname, "../static/app.js"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "../public/static/app.js"), "utf8");
 
 function fixture({requestBytes = 4000000, encode} = {}) {
   const elements = new Map();

@@ -7,7 +7,7 @@
     "app.py": {
       "maxDuration": 300,
       "includeFiles": "{.model-cache/models/**,.model-cache/keras.json,templates/**}",
-      "excludeFiles": "{tests/**,.venv/**,.pytest_cache/**,public/**,static/**,*.log}"
+      "excludeFiles": "{tests/**,.venv/**,.pytest_cache/**,public/**,*.log}"
     }
   },
   "env": {

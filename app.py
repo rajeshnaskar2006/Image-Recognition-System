@@ -11,7 +11,7 @@ from classifier import ImageClassifier, ImageValidationError, ModelUnavailableEr
 
 
 def create_app(config: dict | None = None, classifier=None) -> Flask:
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder="public/static", static_url_path="/static")
     # Leave room for multipart headers below Vercel's 4.5 MB request limit.
     request_upload_bytes = 4_000_000 if os.environ.get("VERCEL") == "1" else MAX_UPLOAD_BYTES
     app.config.update(

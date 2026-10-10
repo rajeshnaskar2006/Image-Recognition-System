@@ -51,8 +51,8 @@ classifier.py           Image validation, OpenCV processing, Keras prediction
 object_detector.py      YOLOX preprocessing and whole-object detection
 prepare_model.py        Download/cache the models and check an inference
 templates/index.html    Web interface
-static/styles.css       Responsive styling
-static/app.js           Uploads, previews, progress, and result rendering
+public/static/styles.css Responsive styling
+public/static/app.js      Uploads, previews, progress, and result rendering
 setup.bat / setup.ps1   Windows setup
 start.bat               Windows launcher
 requirements.txt        Pinned application dependencies
@@ -82,7 +82,7 @@ This app includes a Vercel configuration for Python 3.12 and Flask. Vercel's Hob
 - Import this GitHub repository into Vercel and select the **Hobby** plan.
 - Keep the detected **Flask** framework and the checked-in build command, `python build_vercel.py`.
 - Enable **Fluid compute** and **Large Functions**. New projects are eligible for Large Functions by default; if necessary, set `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` in the project environment and redeploy. The large-function feature is in public beta and is needed for the TensorFlow dependencies. See [Vercel's function limits](https://vercel.com/docs/functions/limitations).
-- Model weights and labels are prepared during the build and included with the deployment. Static assets are copied into `public/static` for Vercel's CDN. The models load on the first prediction in each new function instance, so the first result can take longer.
+- Model weights and labels are prepared during the build and included with the deployment. Static assets are tracked in `public/static` for Vercel's CDN and served at the same `/static` URLs locally. The models load on the first prediction in each new function instance, so the first result can take longer.
 - Verify both the home page and an actual image prediction after deployment. `/api/health` can report `model_ready: false` until that instance processes its first image.
 
 The browser accepts photos up to 25 MiB. On Vercel, larger uploads are prepared in the browser to fit under the platform's 4.5 MB request limit; the direct prediction API accepts at most 4,000,000 image bytes plus a small multipart allowance. The original file stays unchanged. Recognition still uses the same three pretrained models. Local and Render deployments retain the original 25 MiB API limit.
