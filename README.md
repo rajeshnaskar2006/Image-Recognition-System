@@ -81,6 +81,8 @@ On macOS or Linux, use `python3 -m venv .venv` and `.venv/bin/python` for the eq
 
 This app includes a Vercel configuration for Python 3.12 and Flask. Vercel's Hobby plan is for personal, non-commercial projects and has monthly usage limits. Check the current [Hobby terms and allowances](https://vercel.com/docs/plans/hobby).
 
+This repository is connected to the `image-recognition-system` project in Vercel. Pushing changes to `master` automatically builds and updates the [live website](https://image-recognition-system-tau.vercel.app/). Check the project's Deployments tab for build progress and errors.
+
 - Import this GitHub repository into Vercel and select the **Hobby** plan.
 - Keep the detected **Flask** framework and the checked-in build command, `python build_vercel.py`.
 - Enable **Fluid compute** and **Large Functions**. New projects are eligible for Large Functions by default; if necessary, set `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` in the project environment and redeploy. The large-function feature is in public beta and is needed for the TensorFlow dependencies. See [Vercel's function limits](https://vercel.com/docs/functions/limitations).
