@@ -8,7 +8,8 @@
   const analyze = byId("analyze-button");
   const reset = byId("reset-button");
   const resultPanel = byId("results-panel");
-  const MAX_BYTES = 25 * 1024 * 1024;
+  const MAX_BYTES = Number(document.body.dataset.uploadMaxBytes) || 25 * 1024 * 1024;
+  const REQUEST_BYTES = Number(document.body.dataset.requestUploadBytes) || MAX_BYTES;
   const MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
   let selectedFile = null;
   let previewUrl = null;
@@ -86,6 +87,7 @@
     byId("preview-change").hidden = true;
     byId("file-details").hidden = true;
     byId("resize-note").hidden = true;
+    byId("upload-note").hidden = true;
     reset.hidden = true;
     analyze.disabled = true;
     dropzone.classList.remove("has-image", "dragover");
@@ -142,6 +144,81 @@
   function formatLabel(label) {
     const words = String(label).replace(/_/g, " ");
     return words.charAt(0).toUpperCase() + words.slice(1);
+  }
+
+  function checkSelection(version, signal) {
+    if (version !== selectionVersion || signal.aborted) {
+      throw new DOMException("Image selection changed", "AbortError");
+    }
+  }
+
+  async function isAnimatedImage(file) {
+    // Inspect chunk headers only; skip large pixel/metadata chunks without reading them.
+    const header = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+    const ascii = (bytes, start, count) => String.fromCharCode(...bytes.slice(start, start + count));
+    const png = header.length >= 8 && header[0] === 137 && ascii(header, 1, 3) === "PNG";
+    const webp = ascii(header, 0, 4) === "RIFF" && ascii(header, 8, 4) === "WEBP";
+    if (!png && !webp) {
+      if (header[0] === 255 && header[1] === 216) return false;
+      throw new Error("This image cannot be prepared for upload. Please export it as a JPG, PNG or WebP and try again.");
+    }
+    let offset = png ? 8 : 12;
+    // A cap also prevents unusually fragmented files from causing excessive async work.
+    for (let chunks = 0; chunks < 1024 && offset + 8 <= file.size; chunks += 1) {
+      const bytes = new Uint8Array(await file.slice(offset, offset + 9).arrayBuffer());
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      const length = view.getUint32(png ? 0 : 4, !png);
+      const kind = ascii(bytes, png ? 4 : 0, 4);
+      const next = offset + 8 + length + (png ? 4 : length % 2);
+      if (next > file.size) break;
+      if (png) {
+        if (kind === "acTL") return true;
+        if (kind === "IDAT" || kind === "IEND") return false;
+      } else {
+        if (kind === "ANIM" || kind === "ANMF") return true;
+        if (kind === "VP8X" && length >= 1) return Boolean(bytes[8] & 2);
+        if (kind === "VP8 " || kind === "VP8L") return false;
+      }
+      offset = next;
+    }
+    throw new Error("This image cannot be safely prepared for upload. Please export a still image and try again.");
+  }
+
+  async function prepareUpload(file, version, signal) {
+    if (REQUEST_BYTES >= MAX_BYTES || file.size <= REQUEST_BYTES) return file;
+    byId("loading-message").textContent = "Preparing a smaller copy of your image for upload.";
+    announce("Preparing a smaller copy for upload. Your original file is unchanged.");
+    const animated = await isAnimatedImage(file);
+    checkSelection(version, signal);
+    if (animated) {
+      throw new Error("Animated images are not supported. Please choose a still frame saved as a JPG, PNG, or WebP image.");
+    }
+    const canvas = document.createElement("canvas");
+    const scale = Math.min(1, 1600 / Math.max(preview.naturalWidth, preview.naturalHeight));
+    canvas.width = Math.max(1, Math.round(preview.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(preview.naturalHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Your browser could not prepare this image. Try a smaller file.");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(preview, 0, 0, canvas.width, canvas.height);
+    try {
+      for (const quality of [0.9, 0.8, 0.7]) {
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+        checkSelection(version, signal);
+        if (blob && blob.type === "image/jpeg" && blob.size <= REQUEST_BYTES) {
+          byId("upload-note").textContent = `Prepared for upload: ${canvas.width} × ${canvas.height} px JPEG (${(blob.size / 1000000).toFixed(1)} MB). Your original file and preview are unchanged.`;
+          byId("upload-note").hidden = false;
+          byId("loading-message").textContent = "Finding the most likely match for your image.";
+          return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", {type: "image/jpeg"});
+        }
+      }
+      throw new Error("This image is still too large to upload after preparation. Please choose a smaller image.");
+    } finally {
+      // Release the temporary pixel buffer, including when a selection was cancelled.
+      canvas.width = 0;
+      canvas.height = 0;
+    }
   }
 
   function renderResults(data) {
@@ -205,7 +282,7 @@
     const resized = dimensions && dimensions.resized === true && Number.isInteger(dimensions.processed_width) && Number.isInteger(dimensions.processed_height);
     byId("resize-note").hidden = !resized;
     byId("resize-note").textContent = resized
-      ? `Automatically resized for analysis: ${dimensions.width} × ${dimensions.height} → ${dimensions.processed_width} × ${dimensions.processed_height} px. Your original file is unchanged.` : "";
+      ? `Uploaded image resized for analysis: ${dimensions.width} × ${dimensions.height} → ${dimensions.processed_width} × ${dimensions.processed_height} px. Your original file is unchanged.` : "";
     byId("result-model").textContent = typeof data.model === "string" ? data.model : modelName;
     showResultState("ready");
     byId("results-caption").textContent = faceDetection ? "Human face detected" : objectDetection ? "Whole-object detection" : `Top ${predictions.length} matches`;
@@ -217,21 +294,25 @@
     if (!selectedFile || loading) return;
     setError("");
     byId("resize-note").hidden = true;
+    byId("upload-note").hidden = true;
     const version = selectionVersion;
+    const file = selectedFile;
     const controller = new AbortController();
     request = controller;
     setLoading(true);
     showResultState("loading");
     announce("Analyzing image. The first analysis may take longer while the model loads.");
-    const body = new FormData();
-    body.append("image", selectedFile);
     try {
+      const upload = await prepareUpload(file, version, controller.signal);
+      checkSelection(version, controller.signal);
+      const body = new FormData();
+      body.append("image", upload);
       const response = await fetch("/api/predict", {method: "POST", body, signal: controller.signal, headers: {Accept: "application/json"}});
       let data;
       try {
         data = await response.json();
       } catch {
-        throw new Error(response.status === 413 ? "This file exceeds the 25 MB upload limit. Large photo dimensions are resized automatically." : "The server returned an unexpected response. Please try again.");
+        throw new Error(response.status === 413 ? "This image is too large for the server to accept. Please choose a smaller image." : "The server returned an unexpected response. Please try again.");
       }
       if (version !== selectionVersion) return;
       if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "The image could not be analyzed. Please try again.");

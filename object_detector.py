@@ -41,12 +41,13 @@ class ObjectDetector:
         self.strides = np.concatenate(strides).astype(np.float32)
 
     @classmethod
-    def from_pretrained(cls):
-        from tensorflow.keras.utils import get_file
+    def from_pretrained(cls, model_path: str | None = None):
+        if model_path is None:
+            from tensorflow.keras.utils import get_file
 
-        path = get_file("object_detection_yolox_2022nov.onnx", MODEL_URL,
-                        file_hash=MODEL_SHA256, hash_algorithm="sha256", cache_subdir="models")
-        return cls(cv2.dnn.readNetFromONNX(path))
+            model_path = get_file("object_detection_yolox_2022nov.onnx", MODEL_URL,
+                                  file_hash=MODEL_SHA256, hash_algorithm="sha256", cache_subdir="models")
+        return cls(cv2.dnn.readNetFromONNX(model_path))
 
     def detect(self, image: np.ndarray) -> list[dict]:
         height, width = image.shape[:2]

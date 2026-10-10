@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import io
+import json
 import logging
 import os
 from pathlib import Path
@@ -16,7 +18,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 import cv2
 import numpy as np
 from PIL import Image, ImageOps, UnidentifiedImageError
-from object_detector import ObjectDetector
+from object_detector import ObjectDetector, MODEL_SHA256 as OBJECT_MODEL_SHA256
 
 MODEL_NAME = "EfficientNetV2B3"
 MODEL_SIZE = 300
@@ -32,6 +34,13 @@ FACE_MODEL_URL = (
     "models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
 )
 FACE_MODEL_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+# These are the same checksums used by the upstream model downloaders.
+BUNDLED_MODEL_HASHES = {
+    "face_detection_yunet_2023mar.onnx": ("sha256", FACE_MODEL_SHA256),
+    "object_detection_yolox_2022nov.onnx": ("sha256", OBJECT_MODEL_SHA256),
+    "efficientnetv2-b3.h5": ("md5", "1f1fc43bd98a6e4fd8fdfd551e02c7a0"),
+    "imagenet_class_index.json": ("md5", "c2c37ea517e94d9795004a39431a14cb"),
+}
 logger = logging.getLogger(__name__)
 
 
@@ -41,6 +50,43 @@ class ImageValidationError(ValueError):
 
 class ModelUnavailableError(RuntimeError):
     """One of the pretrained models or class labels could not be loaded."""
+
+
+def _bundled_model_files() -> dict[str, Path] | None:
+    """Read a prepared cache directly, including on read-only hosting filesystems."""
+    cache = Path(os.environ["KERAS_HOME"]).expanduser()
+    paths = {name: cache / "models" / name for name in BUNDLED_MODEL_HASHES}
+    if not all(path.is_file() for path in paths.values()):
+        if cache.is_dir() and not os.access(cache, os.W_OK):
+            raise FileNotFoundError("The read-only model bundle is incomplete. Rebuild the deployment.")
+        return None
+    for name, path in paths.items():
+        algorithm, expected = BUNDLED_MODEL_HASHES[name]
+        digest = hashlib.new(algorithm)
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != expected:
+            if os.access(cache, os.W_OK):
+                # Preserve Keras' automatic repair of damaged local downloads.
+                return None
+            raise ValueError(f"The bundled model file failed its checksum: {name}")
+    return paths
+
+
+def _bundled_prediction_decoder(path: Path):
+    with path.open(encoding="utf-8") as source:
+        labels = json.load(source)
+
+    def decode_predictions(scores: np.ndarray, top: int = 5) -> list:
+        if scores.ndim != 2 or scores.shape[1] != 1000:
+            raise ValueError("ImageNet predictions must have shape (samples, 1000).")
+        return [
+            [tuple(labels[str(index)]) + (row[index],) for index in row.argsort()[-top:][::-1]]
+            for row in scores
+        ]
+
+    return decode_predictions
 
 
 @dataclass(frozen=True)
@@ -152,13 +198,24 @@ class ImageClassifier:
             from tensorflow.keras.applications.efficientnet_v2 import EfficientNetV2B3, decode_predictions
             from tensorflow.keras.utils import get_file
 
-            face_path = get_file(
-                "face_detection_yunet_2023mar.onnx", FACE_MODEL_URL,
-                file_hash=FACE_MODEL_SHA256, hash_algorithm="sha256", cache_subdir="models",
-            )
+            bundled = _bundled_model_files()
+            if bundled:
+                # Keras get_file redirects an unwritable cache to /tmp, even when
+                # its files already exist. Explicit paths avoid runtime downloads.
+                face_path = str(bundled["face_detection_yunet_2023mar.onnx"])
+                object_path = str(bundled["object_detection_yolox_2022nov.onnx"])
+                weights = str(bundled["efficientnetv2-b3.h5"])
+                decode_predictions = _bundled_prediction_decoder(bundled["imagenet_class_index.json"])
+            else:
+                face_path = get_file(
+                    "face_detection_yunet_2023mar.onnx", FACE_MODEL_URL,
+                    file_hash=FACE_MODEL_SHA256, hash_algorithm="sha256", cache_subdir="models",
+                )
+                object_path = None
+                weights = "imagenet"
             face_detector = cv2.FaceDetectorYN.create(face_path, "", (320, 320), 0.9, 0.3, 5000)
-            object_detector = ObjectDetector.from_pretrained()
-            model = EfficientNetV2B3(weights="imagenet", include_top=True, include_preprocessing=True)
+            object_detector = ObjectDetector.from_pretrained(object_path)
+            model = EfficientNetV2B3(weights=weights, include_top=True, include_preprocessing=True)
             decode_predictions(np.zeros((1, 1000), dtype=np.float32), top=1)
             model(np.zeros((1, MODEL_SIZE, MODEL_SIZE, 3), dtype=np.float32), training=False)
             self._decode_predictions = decode_predictions

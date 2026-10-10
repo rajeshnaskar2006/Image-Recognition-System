@@ -68,6 +68,23 @@ def test_health_is_available(client):
     assert response.is_json
 
 
+def test_vercel_upload_limit_reserves_multipart_overhead(monkeypatch):
+    monkeypatch.setenv("VERCEL", "1")
+    predictor = StubClassifier()
+    app = create_app({"TESTING": True}, classifier=predictor)
+    assert app.config["MAX_CONTENT_LENGTH"] < 4_500_000
+    response = upload(app.test_client(), b"x" * 4_000_001)
+    assert_json_error(response, 413)
+    assert not predictor.received
+    assert "image picker" in response.get_json()["error"]
+
+
+def test_local_upload_limit_stays_at_25_mib(monkeypatch):
+    monkeypatch.delenv("VERCEL", raising=False)
+    app = create_app({"TESTING": True}, classifier=StubClassifier())
+    assert app.config["MAX_IMAGE_BYTES"] == 25 * 1024 * 1024
+
+
 def test_success_returns_predictions_and_passes_file_bytes(client, classifier):
     response = upload(client)
     assert response.status_code == 200

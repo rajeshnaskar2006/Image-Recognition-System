@@ -1,4 +1,4 @@
-"""Image recognition web app. Run locally or on Render with `python app.py`."""
+"""Image recognition web app for local use and hosted Flask deployments."""
 from __future__ import annotations
 
 import logging
@@ -12,9 +12,11 @@ from classifier import ImageClassifier, ImageValidationError, ModelUnavailableEr
 
 def create_app(config: dict | None = None, classifier=None) -> Flask:
     app = Flask(__name__)
+    # Leave room for multipart headers below Vercel's 4.5 MB request limit.
+    request_upload_bytes = 4_000_000 if os.environ.get("VERCEL") == "1" else MAX_UPLOAD_BYTES
     app.config.update(
-        MAX_CONTENT_LENGTH=MAX_UPLOAD_BYTES + 1024 * 1024,
-        MAX_IMAGE_BYTES=MAX_UPLOAD_BYTES,
+        MAX_CONTENT_LENGTH=request_upload_bytes + 128 * 1024,
+        MAX_IMAGE_BYTES=request_upload_bytes,
         MAX_FORM_MEMORY_SIZE=128 * 1024,
         MAX_FORM_PARTS=10,
     )
@@ -25,7 +27,18 @@ def create_app(config: dict | None = None, classifier=None) -> Flask:
 
     @app.get("/")
     def index():
-        return render_template("index.html")
+        return render_template(
+            "index.html", upload_max_bytes=MAX_UPLOAD_BYTES,
+            request_upload_bytes=app.config["MAX_IMAGE_BYTES"],
+        )
+
+    def upload_limit_message():
+        if app.config["MAX_IMAGE_BYTES"] < MAX_UPLOAD_BYTES:
+            return (
+                "This upload is too large. Use the image picker to automatically prepare "
+                "photos up to 25 MB, or upload an image under 4 MB directly."
+            )
+        return "The image exceeds the 25 MB upload limit. Large photo dimensions are resized automatically."
 
     @app.get("/api/health")
     def health():
@@ -40,7 +53,7 @@ def create_app(config: dict | None = None, classifier=None) -> Flask:
         if not image_bytes:
             return jsonify(error="The image is empty. Please choose another file."), 400
         if len(image_bytes) > app.config["MAX_IMAGE_BYTES"]:
-            return jsonify(error="The image exceeds the 25 MB upload limit. Large photo dimensions are resized automatically."), 413
+            return jsonify(error=upload_limit_message()), 413
         try:
             return jsonify(predictor.predict(image_bytes))
         except ImageValidationError as exc:
@@ -48,8 +61,8 @@ def create_app(config: dict | None = None, classifier=None) -> Flask:
         except ModelUnavailableError:
             app.logger.exception("Model initialization failed")
             return jsonify(error=(
-                "The model could not start. Connect to the internet for the first model download "
-                "and try again. If this continues, run setup.bat and check the server log."
+                "The recognition models are unavailable. Please try again shortly. "
+                "If this continues, the app owner should check the deployment or server log."
             )), 503
         except Exception:
             app.logger.exception("Image prediction failed")
@@ -57,7 +70,7 @@ def create_app(config: dict | None = None, classifier=None) -> Flask:
 
     @app.errorhandler(RequestEntityTooLarge)
     def too_large(_error):
-        return jsonify(error="The image exceeds the 25 MB upload limit. Large photo dimensions are resized automatically."), 413
+        return jsonify(error=upload_limit_message()), 413
 
     @app.after_request
     def response_headers(response):

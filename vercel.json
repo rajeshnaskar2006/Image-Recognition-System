@@ -1,0 +1,26 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "flask",
+  "buildCommand": "python build_vercel.py",
+  "fluid": true,
+  "functions": {
+    "app.py": {
+      "maxDuration": 300,
+      "includeFiles": "{.model-cache/models/**,.model-cache/keras.json,templates/**}",
+      "excludeFiles": "{tests/**,.venv/**,.pytest_cache/**,public/**,static/**,*.log}"
+    }
+  },
+  "env": {
+    "TF_NUM_INTRAOP_THREADS": "1",
+    "TF_NUM_INTEROP_THREADS": "1",
+    "OMP_NUM_THREADS": "1"
+  },
+  "headers": [
+    {
+      "source": "/static/(.*)",
+      "headers": [
+        {"key": "X-Content-Type-Options", "value": "nosniff"}
+      ]
+    }
+  ]
+}
