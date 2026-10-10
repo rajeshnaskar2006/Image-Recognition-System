@@ -1,5 +1,7 @@
 # Image Recognition System
 
+**[Live demo — try Lens online](https://image-recognition-system-tau.vercel.app/)**
+
 A complete local web app for recognizing objects in uploaded images. Built with **Python, TensorFlow/Keras, OpenCV, and Flask**, with a responsive browser interface named **Lens**.
 
 ## Start on Windows
